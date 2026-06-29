@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Fruit Slash – Hand Gesture Game</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #080810;
+      --accent: #ff4e00;
+      --accent2: #ff9500;
+      --blade: #00e5ff;
+      --text: #f0ede8;
+      --muted: #5a5870;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    #game-wrapper {
+      position: relative;
+      width: 720px;
+      height: 540px;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 0 60px #0006, 0 0 0 1px #ffffff08;
+    }
+
+    /* ── CANVAS LAYERS ── */
+    canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 720px; height: 540px;
+    }
+    #c-cam    { z-index: 1; opacity: 0.18; transform: scaleX(-1); }
+    #c-game   { z-index: 2; }
+    #c-hand   { z-index: 3; }
+    #c-blade  { z-index: 4; }
+
+    /* ── HUD ── */
+    #hud {
+      position: absolute; top: 0; left: 0; right: 0;
+      z-index: 10; pointer-events: none;
+      display: flex; justify-content: space-between; align-items: flex-start;
+      padding: 14px 20px;
+    }
+    #score-display {
+      font-size: 2.4rem; font-weight: 900; color: var(--accent2);
+      text-shadow: 0 0 20px #ff950060;
+    }
+    #lives-display { font-size: 1.6rem; letter-spacing: 3px; }
+    #combo-display {
+      position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
+      font-size: 0.9rem; font-weight: 800; color: var(--blade);
+      letter-spacing: 1px; opacity: 0; transition: opacity 0.2s;
+      text-shadow: 0 0 12px var(--blade);
+    }
+    #combo-display.show { opacity: 1; }
+
+    /* ── GESTURE INDICATOR ── */
+    #gesture-badge {
+      position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 10; pointer-events: none;
+      background: #ffffff0a; border: 1px solid #ffffff12;
+      border-radius: 40px; padding: 5px 16px;
+      font-size: 0.72rem; color: var(--muted); letter-spacing: 0.8px;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    #gesture-badge.active {
+      color: var(--blade); border-color: #00e5ff44;
+      text-shadow: 0 0 8px var(--blade);
+    }
+
+    /* ── SCREENS ── */
+    .screen {
+      position: absolute; inset: 0; z-index: 20;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      background: radial-gradient(ellipse at 50% 35%, #18103a 0%, #08080f 70%);
+      text-align: center; padding: 36px;
+      transition: opacity 0.35s;
+    }
+    .screen.hidden { opacity: 0; pointer-events: none; }
+
+    .title {
+      font-size: 3.2rem; font-weight: 900; letter-spacing: -1.5px; line-height: 1;
+      background: linear-gradient(130deg, #ffb347, #ff4e00);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .subtitle { font-size: 0.92rem; color: var(--muted); max-width: 380px; line-height: 1.7; }
+
+    .gesture-guide {
+      display: flex; gap: 20px; margin: 8px 0;
+    }
+    .gesture-card {
+      background: #ffffff07; border: 1px solid #ffffff10;
+      border-radius: 14px; padding: 14px 20px; min-width: 140px;
+    }
+    .gesture-card .icon { font-size: 2rem; margin-bottom: 6px; }
+    .gesture-card .label { font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+
+    .btn {
+      padding: 13px 36px; border-radius: 50px; border: none;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer;
+      transition: transform 0.15s, opacity 0.15s;
+    }
+    .btn:hover { transform: scale(1.04); }
+    .btn:active { transform: scale(0.97); }
+
+    /* ── SCORE POP ── */
+    .score-pop {
+      position: absolute; z-index: 15; pointer-events: none;
+      font-size: 1.6rem; font-weight: 900; color: var(--accent2);
+      text-shadow: 0 0 14px #ff950080;
+      animation: floatUp 0.9s ease-out forwards;
+    }
+    @keyframes floatUp {
+      from { opacity: 1; transform: translateY(0) scale(1); }
+      to   { opacity: 0; transform: translateY(-70px) scale(1.25); }
+    }
+
+    /* ── STATUS ── */
+    #status-bar {
+      margin-top: 10px; font-size: 0.75rem; color: var(--muted);
+      letter-spacing: 0.4px; height: 20px; display: flex; align-items: center; gap: 6px;
+    }
+    #cam-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: #333;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    #cam-dot.on  { background: #00c853; box-shadow: 0 0 7px #00c853; }
+    #cam-dot.err { background: #ff1744; }
+
+    /* ── CAM LOADING OVERLAY ── */
+    #loading-overlay {
+      position: absolute; inset: 0; z-index: 30;
+      background: #08080fee;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px;
+      border-radius: 20px;
+    }
+    #loading-overlay.hidden { display: none; }
+    .spinner {
+      width: 44px; height: 44px;
+      border: 3px solid #ffffff12;
+      border-top-color: var(--blade);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-text { font-size: 0.88rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<div id="game-wrapper">
+  <!-- Camera feed (background, mirrored) -->
+  <canvas id="c-cam"   width="720" height="540"></canvas>
+  <!-- Game objects -->
+  <canvas id="c-game"  width="720" height="540"></canvas>
+  <!-- Hand skeleton overlay -->
+  <canvas id="c-hand"  width="720" height="540"></canvas>
+  <!-- Blade trail (top) -->
+  <canvas id="c-blade" width="720" height="540"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="score-display">0</div>
+    <div id="combo-display">COMBO 🔥</div>
+    <div id="lives-display">❤️❤️❤️</div>
+  </div>
+  <div id="gesture-badge">✋ SHOW YOUR HAND</div>
+
+  <!-- Loading overlay -->
+  <div id="loading-overlay" class="hidden">
+    <div class="spinner"></div>
+    <div id="loading-text">Starting camera…</div>
+  </div>
+
+  <!-- Start Screen -->
+  <div class="screen" id="start-screen">
+    <div class="title">🍉 FRUIT SLASH</div>
+    <p class="subtitle">Pure hand-gesture control — no touching required.<br>Your webcam tracks every move.</p>
+    <div class="gesture-guide">
+      <div class="gesture-card">
+        <div class="icon">🖐️</div>
+        <div class="label"><strong>Open hand</strong><br>activates blade</div>
+      </div>
+      <div class="gesture-card">
+        <div class="icon">✋➡️</div>
+        <div class="label"><strong>Swipe fast</strong><br>to slice fruits</div>
+      </div>
+      <div class="gesture-card">
+        <div class="icon">✊</div>
+        <div class="label"><strong>Fist / closed</strong><br>= no blade</div>
+      </div>
+    </div>
+    <button class="btn" id="btn-start">▶ Start — Enable Camera</button>
+  </div>
+
+  <!-- Game Over Screen -->
+  <div class="screen hidden" id="gameover-screen">
+    <div class="title">GAME OVER</div>
+    <p class="subtitle" id="final-msg">Score: 0</p>
+    <button class="btn" id="btn-restart">↺ Play Again</button>
+  </div>
+</div>
+
+<div id="status-bar">
+  <span id="cam-dot"></span>
+  <span id="status-text">Camera not started</span>
+</div>
+
+<!-- MediaPipe via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+'use strict';
+// ═══════════════════════════════════════════════
+//  CANVAS CONTEXTS
+// ═══════════════════════════════════════════════
+const W = 720, H = 540;
+const camCtx   = document.getElementById('c-cam').getContext('2d');
+const gameCtx  = document.getElementById('c-game').getContext('2d');
+const handCtx  = document.getElementById('c-hand').getContext('2d');
+const bladeCtx = document.getElementById('c-blade').getContext('2d');
+
+// ═══════════════════════════════════════════════
+//  HAND STATE  (set by MediaPipe callback)
+// ═══════════════════════════════════════════════
+let landmarks = null;      // 21 landmarks [{x,y,z}]
+let handOpen  = false;     // true = open palm → blade active
+let fingerTip = null;      // {x,y} canvas coords of index tip
+let palmCenter= null;      // {x,y} canvas coords
+
+// blade trail: [{x,y,t}]
+let bladeTrail = [];
+
+// ═══════════════════════════════════════════════
+//  GAME STATE
+// ═══════════════════════════════════════════════
+let gameRunning = false;
+let score=0, lives=3, combo=0, comboTimer=0;
+let fruits=[], particles=[], bombs=[];
+let spawnTimer=0, spawnInterval=85;
+let shakeFrames=0;
+let animId=null;
+
+// ═══════════════════════════════════════════════
+//  FRUIT DEFINITIONS
+// ═══════════════════════════════════════════════
+const FRUITS = [
+  { e:'🍉', juice:'#ff4136', pts:3, r:35 },
+  { e:'🍊', juice:'#ffb347', pts:2, r:28 },
+  { e:'🍋', juice:'#fff176', pts:2, r:26 },
+  { e:'🍇', juice:'#c39bd3', pts:4, r:30 },
+  { e:'🍓', juice:'#ff8888', pts:2, r:26 },
+  { e:'🍍', juice:'#fde68a', pts:3, r:32 },
+  { e:'🍑', juice:'#ffd5cc', pts:2, r:27 },
+  { e:'🥭', juice:'#ffeaa7', pts:3, r:31 },
+  { e:'🍈', juice:'#a8e063', pts:2, r:29 },
+  { e:'🍒', juice:'#c0392b', pts:5, r:22 },
+];
+
+function mkFruit() {
+  const d = FRUITS[Math.floor(Math.random()*FRUITS.length)];
+  return {
+    ...d, x: d.r + Math.random()*(W-d.r*2),
+    y: H+d.r+10, vx:(Math.random()-.5)*3.5,
+    vy:-(10+Math.random()*5),
+    rot:0, rotV:(Math.random()-.5)*0.13,
+    sliced:false, alpha:1, missed:false,
+    h1vx:0, h1vy:0, h2vx:0, h2vy:0,
+    sliceAngle: 0
+  };
+}
+
+function mkBomb() {
+  return {
+    x:50+Math.random()*(W-100), y:H+30,
+    vx:(Math.random()-.5)*2.5, vy:-(8+Math.random()*4.5),
+    r:27, rot:0, rotV:(Math.random()-.5)*0.1, hit:false
+  };
+}
+
+// ═══════════════════════════════════════════════
+//  PARTICLES
+// ═══════════════════════════════════════════════
+function burst(x, y, color, n=22) {
+  for (let i=0;i<n;i++) {
+    const a=Math.random()*Math.PI*2, s=1.5+Math.random()*6;
+    particles.push({
+      x,y, vx:Math.cos(a)*s, vy:Math.sin(a)*s,
+      r:2+Math.random()*5, color, alpha:1,
+      decay:0.013+Math.random()*0.018
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  GESTURE DETECTION
+//  Uses 21 MediaPipe landmarks
+//  Open hand = fingers extended upward
+// ═══════════════════════════════════════════════
+// Finger tip indices: thumb=4, index=8, middle=12, ring=16, pinky=20
+// MCP (knuckle) indices: thumb=2, index=5, middle=9, ring=13, pinky=17
+const TIPS = [8, 12, 16, 20];
+const PIPS = [6, 10, 14, 18]; // second joint
+
+function detectOpenHand(lm) {
+  if (!lm || lm.length < 21) return false;
+  // A finger is "extended" if tip y < pip y (in image space, y increases downward)
+  // We count how many of index/middle/ring/pinky are extended
+  let extended = 0;
+  for (let i=0; i<TIPS.length; i++) {
+    if (lm[TIPS[i]].y < lm[PIPS[i]].y) extended++;
+  }
+  return extended >= 3; // at least 3 fingers up = open / slicing pose
+}
+
+function lmToCanvas(lm_pt) {
+  // MediaPipe gives 0-1 normalized; x is mirrored
+  return { x: (1 - lm_pt.x) * W, y: lm_pt.y * H };
+}
+
+// ═══════════════════════════════════════════════
+//  BLADE TRAIL & VELOCITY
+// ═══════════════════════════════════════════════
+function updateBlade() {
+  const now = performance.now();
+  if (fingerTip && handOpen) {
+    bladeTrail.push({ ...fingerTip, t: now });
+  }
+  bladeTrail = bladeTrail.filter(p => now - p.t < 200);
+}
+
+function bladeSpeed() {
+  if (bladeTrail.length < 3) return 0;
+  const recent = bladeTrail.slice(-5);
+  let d = 0;
+  for (let i=1;i<recent.length;i++) {
+    const dx=recent[i].x-recent[i-1].x, dy=recent[i].y-recent[i-1].y;
+    d += Math.sqrt(dx*dx+dy*dy);
+  }
+  return d;
+}
+
+// ═══════════════════════════════════════════════
+//  DRAW: HAND SKELETON
+// ═══════════════════════════════════════════════
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],       // thumb
+  [0,5],[5,6],[6,7],[7,8],       // index
+  [5,9],[9,10],[10,11],[11,12],  // middle
+  [9,13],[13,14],[14,15],[15,16],// ring
+  [13,17],[17,18],[18,19],[19,20],// pinky
+  [0,17]                          // palm base
+];
+
+function drawHand() {
+  handCtx.clearRect(0,0,W,H);
+  if (!landmarks) return;
+  const lm = landmarks;
+  const open = handOpen;
+
+  const pts = lm.map(lmToCanvas);
+
+  // skeleton lines
+  handCtx.lineWidth = 2.5;
+  for (const [a,b] of CONNECTIONS) {
+    handCtx.beginPath();
+    handCtx.moveTo(pts[a].x, pts[a].y);
+    handCtx.lineTo(pts[b].x, pts[b].y);
+    handCtx.strokeStyle = open ? 'rgba(0,229,255,0.55)' : 'rgba(180,180,255,0.25)';
+    handCtx.stroke();
+  }
+
+  // joints
+  for (let i=0;i<pts.length;i++) {
+    const isTip = TIPS.includes(i) || i===4;
+    handCtx.beginPath();
+    handCtx.arc(pts[i].x, pts[i].y, isTip ? 5 : 3, 0, Math.PI*2);
+    handCtx.fillStyle = isTip
+      ? (open ? '#00e5ff' : '#8888ff')
+      : (open ? 'rgba(0,229,255,0.4)' : 'rgba(180,180,255,0.2)');
+    handCtx.fill();
+  }
+
+  // index fingertip glow when open
+  if (open && fingerTip) {
+    handCtx.beginPath();
+    handCtx.arc(fingerTip.x, fingerTip.y, 14, 0, Math.PI*2);
+    handCtx.fillStyle = 'rgba(0,229,255,0.18)';
+    handCtx.fill();
+    handCtx.beginPath();
+    handCtx.arc(fingerTip.x, fingerTip.y, 6, 0, Math.PI*2);
+    handCtx.fillStyle = '#00e5ff';
+    handCtx.fill();
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  DRAW: BLADE TRAIL
+// ═══════════════════════════════════════════════
+function drawBlade() {
+  bladeCtx.clearRect(0,0,W,H);
+  if (!handOpen || bladeTrail.length < 2) return;
+  const now = performance.now();
+
+  for (let i=1;i<bladeTrail.length;i++) {
+    const a=bladeTrail[i-1], b=bladeTrail[i];
+    const age = (now-b.t)/200;
+    const alpha = (1-age)*0.9;
+    const width = (1-age)*9+1;
+
+    // outer glow
+    bladeCtx.beginPath();
+    bladeCtx.moveTo(a.x,a.y); bladeCtx.lineTo(b.x,b.y);
+    bladeCtx.strokeStyle = `rgba(0,200,255,${alpha*0.3})`;
+    bladeCtx.lineWidth = width+8;
+    bladeCtx.lineCap='round';
+    bladeCtx.stroke();
+
+    // core
+    bladeCtx.beginPath();
+    bladeCtx.moveTo(a.x,a.y); bladeCtx.lineTo(b.x,b.y);
+    bladeCtx.strokeStyle = `rgba(180,245,255,${alpha})`;
+    bladeCtx.lineWidth = width;
+    bladeCtx.stroke();
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  DRAW: GAME OBJECTS
+// ═══════════════════════════════════════════════
+function drawGame() {
+  gameCtx.clearRect(0,0,W,H);
+
+  // bg gradient
+  const g = gameCtx.createRadialGradient(W/2,H/2,60,W/2,H/2,W*.8);
+  g.addColorStop(0,'#16102e'); g.addColorStop(1,'#080810');
+  gameCtx.fillStyle=g; gameCtx.fillRect(0,0,W,H);
+
+  // particles
+  for (const p of particles) {
+    gameCtx.globalAlpha = p.alpha;
+    gameCtx.beginPath();
+    gameCtx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    gameCtx.fillStyle=p.color; gameCtx.fill();
+  }
+  gameCtx.globalAlpha=1;
+
+  // fruits
+  for (const f of fruits) {
+    gameCtx.save();
+    gameCtx.globalAlpha = f.alpha;
+    if (!f.sliced) {
+      gameCtx.translate(f.x, f.y);
+      gameCtx.rotate(f.rot);
+      gameCtx.font=`${f.r*1.85}px serif`;
+      gameCtx.textAlign='center'; gameCtx.textBaseline='middle';
+      gameCtx.fillText(f.e,0,0);
+    } else {
+      // left half
+      gameCtx.save();
+      gameCtx.translate(f.x + f.h1vx, f.y + f.h1vy);
+      gameCtx.rotate(f.sliceAngle + f.rot);
+      gameCtx.font=`${f.r*1.85}px serif`;
+      gameCtx.textAlign='center'; gameCtx.textBaseline='middle';
+      gameCtx.beginPath(); gameCtx.rect(-f.r*2,-f.r*2,f.r*2,f.r*4);
+      gameCtx.clip(); gameCtx.fillText(f.e,0,0);
+      // juice drip
+      gameCtx.beginPath(); gameCtx.moveTo(0,0); gameCtx.lineTo(0,f.r);
+      gameCtx.strokeStyle=f.juice; gameCtx.lineWidth=3;
+      gameCtx.globalAlpha=f.alpha*.7; gameCtx.stroke();
+      gameCtx.restore();
+      // right half
+      gameCtx.save();
+      gameCtx.translate(f.x + f.h2vx, f.y + f.h2vy);
+      gameCtx.rotate(-f.sliceAngle + f.rot);
+      gameCtx.font=`${f.r*1.85}px serif`;
+      gameCtx.textAlign='center'; gameCtx.textBaseline='middle';
+      gameCtx.beginPath(); gameCtx.rect(0,-f.r*2,f.r*2,f.r*4);
+      gameCtx.clip(); gameCtx.fillText(f.e,0,0);
+      gameCtx.restore();
+    }
+    gameCtx.restore();
+  }
+
+  // bombs
+  for (const b of bombs) {
+    gameCtx.save();
+    gameCtx.translate(b.x,b.y); gameCtx.rotate(b.rot);
+    gameCtx.font=`${b.r*1.9}px serif`;
+    gameCtx.textAlign='center'; gameCtx.textBaseline='middle';
+    gameCtx.fillText('💣',0,0);
+    // warning ring
+    gameCtx.beginPath();
+    gameCtx.arc(0,0,b.r+4,0,Math.PI*2);
+    gameCtx.strokeStyle='rgba(255,68,0,0.35)'; gameCtx.lineWidth=2;
+    gameCtx.stroke();
+    gameCtx.restore();
+  }
+
+  // "hand required" hint when no hand detected
+  if (!landmarks && gameRunning) {
+    gameCtx.globalAlpha=0.25;
+    gameCtx.font='bold 15px sans-serif';
+    gameCtx.fillStyle='#fff';
+    gameCtx.textAlign='center'; gameCtx.textBaseline='middle';
+    gameCtx.fillText('✋ Show your hand to the camera',W/2,H-26);
+    gameCtx.globalAlpha=1;
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  COLLISION / SLICE CHECK
+// ═══════════════════════════════════════════════
+function checkSlices() {
+  if (!fingerTip || !handOpen) return;
+  const spd = bladeSpeed();
+  if (spd < 10) return; // must be a real swipe
+
+  for (const f of fruits) {
+    if (f.sliced) continue;
+    const dx=fingerTip.x-f.x, dy=fingerTip.y-f.y;
+    if (Math.sqrt(dx*dx+dy*dy) < f.r+6) sliceFruit(f);
+  }
+  for (const b of bombs) {
+    if (b.hit) continue;
+    const dx=fingerTip.x-b.x, dy=fingerTip.y-b.y;
+    if (Math.sqrt(dx*dx+dy*dy) < b.r+6) hitBomb(b);
+  }
+}
+
+function sliceFruit(f) {
+  f.sliced=true;
+  f.sliceAngle = (Math.random()-.5)*0.5;
+  f.h1vx = -3 - Math.random()*2;
+  f.h1vy = -1;
+  f.h2vx =  3 + Math.random()*2;
+  f.h2vy = -1;
+
+  combo++; comboTimer=130;
+  const mult = combo>=5?3 : combo>=3?2 : 1;
+  const pts = f.pts*mult;
+  score+=pts;
+  updateHUD();
+  burst(f.x,f.y,f.juice);
+  popScore(f.x,f.y,`+${pts}${combo>=3?' 🔥':''}`);
+}
+
+function hitBomb(b) {
+  b.hit=true;
+  lives = Math.max(0,lives-1);
+  combo=0; comboTimer=0;
+  burst(b.x,b.y,'#ff4444',30);
+  shakeFrames=14;
+  updateHUD();
+  if (lives<=0) endGame();
+}
+
+// ═══════════════════════════════════════════════
+//  PHYSICS
+// ═══════════════════════════════════════════════
+const GRAVITY=0.24;
+
+function updateObjects() {
+  for (const f of fruits) {
+    f.vy+=GRAVITY; f.x+=f.vx; f.y+=f.vy; f.rot+=f.rotV;
+    if (f.sliced) {
+      f.h1vx*=0.97; f.h2vx*=0.97;
+      f.h1vy+=GRAVITY*0.5; f.h2vy+=GRAVITY*0.5;
+      f.alpha-=0.016;
+    }
+    if (!f.sliced && !f.missed && f.y>H+f.r+10) {
+      f.missed=true;
+      lives=Math.max(0,lives-1);
+      combo=0; shakeFrames=8;
+      updateHUD();
+      if (lives<=0) endGame();
+    }
+  }
+  fruits=fruits.filter(f=>f.y<H+160 && f.alpha>0);
+
+  for (const b of bombs) {
+    b.vy+=GRAVITY; b.x+=b.vx; b.y+=b.vy; b.rot+=b.rotV;
+  }
+  bombs=bombs.filter(b=>b.y<H+80);
+
+  for (const p of particles) {
+    p.vy+=0.18; p.vx*=0.97;
+    p.x+=p.vx; p.y+=p.vy;
+    p.alpha-=p.decay;
+  }
+  particles=particles.filter(p=>p.alpha>0);
+
+  if (comboTimer>0){ comboTimer--; if(comboTimer===0){combo=0; updateHUD();} }
+}
+
+function spawnObjects() {
+  spawnTimer++;
+  if (spawnTimer>=spawnInterval) {
+    spawnTimer=0;
+    const n = Math.random()<0.3 ? 2 : 1;
+    for(let i=0;i<n;i++) fruits.push(mkFruit());
+    if (Math.random()<0.10+score*0.0008) bombs.push(mkBomb());
+    spawnInterval=Math.max(38,85-Math.floor(score/25)*4);
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  HUD / UI
+// ═══════════════════════════════════════════════
+function updateHUD() {
+  document.getElementById('score-display').textContent=score;
+  const lArr=['','❤️','❤️❤️','❤️❤️❤️'];
+  document.getElementById('lives-display').textContent=lArr[Math.max(0,lives)]||'';
+  const cd=document.getElementById('combo-display');
+  if (combo>=3) {
+    cd.textContent=`${combo}× COMBO 🔥`;
+    cd.classList.add('show');
+  } else {
+    cd.classList.remove('show');
+  }
+  // gesture badge
+  const gb=document.getElementById('gesture-badge');
+  if (landmarks) {
+    gb.textContent = handOpen ? '⚡ BLADE ACTIVE — SWIPE!' : '✊ OPEN YOUR HAND TO SLASH';
+    gb.className = handOpen ? 'active' : '';
+  } else {
+    gb.textContent='✋ SHOW YOUR HAND TO THE CAMERA';
+    gb.className='';
+  }
+}
+
+function popScore(x,y,txt) {
+  const el=document.createElement('div');
+  el.className='score-pop';
+  el.textContent=txt;
+  el.style.cssText=`left:${x}px;top:${y-20}px;`;
+  document.getElementById('game-wrapper').appendChild(el);
+  el.addEventListener('animationend',()=>el.remove());
+}
+
+function setStatus(txt,state) {
+  document.getElementById('status-text').textContent=txt;
+  document.getElementById('cam-dot').className=
+    state==='on'?'on':state==='err'?'err':'';
+}
+
+// ═══════════════════════════════════════════════
+//  GAME LOOP
+// ═══════════════════════════════════════════════
+function loop() {
+  if (!gameRunning) return;
+  spawnObjects();
+  updateObjects();
+  updateBlade();
+  checkSlices();
+  drawGame();
+  drawHand();
+  drawBlade();
+  updateHUD();
+
+  // shake
+  const w=document.getElementById('game-wrapper');
+  if (shakeFrames>0) {
+    shakeFrames--;
+    w.style.transform=`translate(${shakeFrames%2?4:-4}px,${shakeFrames%3?2:-2}px)`;
+  } else { w.style.transform=''; }
+
+  animId=requestAnimationFrame(loop);
+}
+
+function startGame() {
+  score=0;lives=3;combo=0;comboTimer=0;
+  fruits=[];particles=[];bombs=[];
+  spawnTimer=0;spawnInterval=85;shakeFrames=0;
+  bladeTrail=[];
+  updateHUD();
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('gameover-screen').classList.add('hidden');
+  gameRunning=true;
+  if(animId) cancelAnimationFrame(animId);
+  loop();
+}
+
+function endGame() {
+  gameRunning=false;
+  if(animId) cancelAnimationFrame(animId);
+  drawHand(); drawBlade(); // keep last frame visible
+  document.getElementById('final-msg').textContent=
+    `Your score: ${score} 🎉  |  Best combo: ${combo}×`;
+  document.getElementById('gameover-screen').classList.remove('hidden');
+}
+
+// ═══════════════════════════════════════════════
+//  MEDIAPIPE HANDS INIT
+// ═══════════════════════════════════════════════
+let mpReady=false, videoEl=null;
+
+async function initCamera() {
+  const overlay=document.getElementById('loading-overlay');
+  const loadTxt=document.getElementById('loading-text');
+  overlay.classList.remove('hidden');
+
+  try {
+    loadTxt.textContent='Requesting camera access…';
+    setStatus('Requesting camera…','');
+
+    videoEl=document.createElement('video');
+    videoEl.width=W; videoEl.height=H;
+    videoEl.autoplay=true; videoEl.playsInline=true;
+
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:W}, height:{ideal:H}, facingMode:'user' }
+    });
+    videoEl.srcObject=stream;
+
+    loadTxt.textContent='Loading hand-tracking model…';
+    setStatus('Loading hand model…','');
+
+    const mpHands=new Hands({
+      locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+    });
+    mpHands.setOptions({
+      maxNumHands:1,
+      modelComplexity:1,
+      minDetectionConfidence:0.7,
+      minTrackingConfidence:0.6
+    });
+    mpHands.onResults(onHandResults);
+
+    const cam=new Camera(videoEl,{
+      onFrame: async ()=>{
+        // draw cam feed (mirrored)
+        camCtx.save();
+        camCtx.scale(-1,1);
+        camCtx.drawImage(videoEl,-W,0,W,H);
+        camCtx.restore();
+        await mpHands.send({image:videoEl});
+      },
+      width:W, height:H
+    });
+    await cam.start();
+
+    mpReady=true;
+    overlay.classList.add('hidden');
+    setStatus('Hand tracking active ✓','on');
+  } catch(err) {
+    overlay.classList.add('hidden');
+    setStatus('Camera error: '+err.message,'err');
+    console.error(err);
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  MEDIAPIPE RESULT HANDLER
+// ═══════════════════════════════════════════════
+function onHandResults(results) {
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length>0) {
+    landmarks = results.multiHandLandmarks[0];
+    handOpen  = detectOpenHand(landmarks);
+    fingerTip = lmToCanvas(landmarks[8]);   // index finger tip
+    palmCenter= lmToCanvas(landmarks[0]);   // wrist
+
+    // if not in game, still render the hand overlay
+    if (!gameRunning) {
+      drawHand();
+      updateBlade();
+      drawBlade();
+    }
+  } else {
+    landmarks = null;
+    handOpen  = false;
+    fingerTip = null;
+    palmCenter= null;
+    if (!gameRunning) {
+      handCtx.clearRect(0,0,W,H);
+      bladeCtx.clearRect(0,0,W,H);
+    }
+  }
+  if (!gameRunning) updateHUD();
+}
+
+// ═══════════════════════════════════════════════
+//  BUTTONS
+// ═══════════════════════════════════════════════
+document.getElementById('btn-start').addEventListener('click', async ()=>{
+  if (!mpReady) await initCamera();
+  startGame();
+});
+
+document.getElementById('btn-restart').addEventListener('click', ()=>{
+  startGame();
+});
+
+// initial bg draw
+drawGame();
+</script>
+</body>
+</html>
